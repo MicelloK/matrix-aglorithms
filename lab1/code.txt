@@ -134,7 +134,78 @@ print("Number of operations:", operation_count)
 print("Number of operations (Standard mlt):", standard_mlt(A, B)[1])
 # print("Result:", res, sep='\n')
 
-///////////////////        TUTAJ BĘDZIE AI          /////////////////////////
+
+def ai_mlt(A,B, factor):
+    global operation_count
+    if A.shape == (4,5) and B.shape == (5,5):
+        result = np.zeros((4,5), dtype=float)
+        for i in range(len(A)):
+            for j in range(len(B[0])):
+                   for k in range(len(B)):
+                        result[i][j] += A[i][k] * B[k][j]
+                        plus_count += 1
+                        mult_count += 1
+        return result
+
+    
+    
+    
+    n = len(A)//4
+    m = len(A[0])//5
+    k = len(B[0])//5
+    
+    
+    t1 = factor[0]
+    t2 = factor[1]
+    t3 = factor[2]
+    
+    mul_len = t1.shape[1]
+    
+    mtab = [None for _ in range(mul_len)]
+    for i in range(mul_len):
+        A_elements = t1[:, i]
+        B_elements = t2[:, i]
+        
+        A_factor = np.zeros((n,m), dtype = float)
+        for j in range(len(A_elements)):
+            if A_elements[j] != 0:
+                x,y = np.unravel_index(j, (4,5))
+                A_factor += A[x*n:(x+1)*n, y*m: (y+1)*m]*A_elements[j]
+                
+                operation_count += len(A_factor)*len(A_factor[0])
+        
+        B_factor = np.zeros((k,k), dtype = float)
+        for j in range(len(B_elements)):
+            if B_elements[j] != 0:
+                x,y = np.unravel_index(j, (5,5))
+                B_factor += B[x*k:(x+1)*k, y*k: (y+1)*k]*B_elements[j]
+                
+                operation_count += len(B_factor)**2
+        
+        m_res = ai_mlt(A_factor, B_factor, factor)
+        mtab[i] = m_res
+    
+    res_matrix = np.zeros((n*4,m*5), dtype = float)
+    
+    xind = 0
+    yind = 0
+    for i in range(t3.shape[0]):
+        x,y = np.unravel_index(i, (4,5))
+        res_fragment = np.zeros((n,m), dtype = float)
+        C_elements = t3[i, :]
+        for j in range(len(C_elements)):
+            if C_elements[j] != 0:
+                res_fragment += mtab[j]*C_elements[j]
+        
+        if xind >= 4:  
+            yind+=1
+            xind=0
+        
+        res_matrix[xind*n:(xind+1)*n, yind*m: (yind+1)*m] = res_fragment
+        
+        xind+=1
+        
+    return res_matrix
 
 /////////////////////////////////////////////////////////////////////////////
 

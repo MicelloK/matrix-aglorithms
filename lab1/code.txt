@@ -6,8 +6,8 @@ def random_matrix(matrix_size, min_val, max_val):
     """Return matrix with random floats from [min_val, max_val)"""
     return (max_val - min_val) * np.random.random(matrix_size) + min_val
 
-exp = 4
-matrix_size = (exp, exp)
+exp = 6
+matrix_size = (2**exp, 2**exp)
 
 min_val = 0.00000001
 max_val = 1
@@ -16,9 +16,9 @@ A = random_matrix(matrix_size, min_val, max_val)
 B = random_matrix(matrix_size, min_val, max_val)
 
 def standard_mlt(A, B):
-    """Return tuple with mlt result and no_operations"""
+    """Return tuple with mlt result, no_plus_op, no_mul_op"""
     operation_count = 0
-    result = np.zeros((len(A), len(A)), dtype=float)
+    result = np.zeros((len(A), len(B[0])), dtype=float)
     for i in range(len(A)):
         for j in range(len(B[0])):
                for k in range(len(B)):
@@ -58,9 +58,16 @@ def binet_mlt(A, B):
         C12 = binet_mlt(A11, B12) + binet_mlt(A12, B22)
         C21 = binet_mlt(A21, B11) + binet_mlt(A22, B21)
         C22 = binet_mlt(A21, B12) + binet_mlt(A22, B22)
-        operation_count += matrix_size ** 2
+
+        operation_count += 4*len(C11)**2
         
-        return np.vstack((np.hstack((C11, C12)), np.hstack((C21, C22))))
+        result = np.empty((matrix_size, matrix_size))
+        result[:matrix_size // 2, :matrix_size // 2] = C11
+        result[:matrix_size // 2, matrix_size // 2:] = C12
+        result[matrix_size // 2:, :matrix_size // 2] = C21
+        result[matrix_size // 2:, matrix_size // 2:] = C22
+        
+        return result
 
 operation_count = 0
 res = binet_mlt(A, B)
@@ -73,8 +80,9 @@ print("Number of operations (Standard mlt):", standard_mlt(A, B)[1])
 
 def strassen_mlt(A,B):
     global operation_count
-    
+
     n = len(A)
+    
     if(n==2):
         a00 = A[0,0]*B[0,0] + A[0,1]*B[1,0]
         a01 = A[0,0]*B[0,1] + A[0,1]*B[1,1]
@@ -84,19 +92,20 @@ def strassen_mlt(A,B):
         
         operation_count += 12
         return np.array([[a00,a01],
-                        [a10,a11]])
-    
+                         [a10,a11]])
+        
     A11 = A[:n//2, :n//2]
     B11 = B[:n//2, :n//2]
-    
+
     A12 = A[:n//2, (n//2):]
     B12 = B[:n//2, (n//2):]
-    
+
     A21 = A[(n//2): , :n//2]
     B21 = B[(n//2): , :n//2]
-    
+
     A22 = A[(n//2): , (n//2):]
     B22 = B[(n//2): , (n//2):]
+    
 
     P1 = strassen_mlt((A11 + A22), (B11 + B22))
     P2 = strassen_mlt((A21 + A22), B11)
@@ -111,7 +120,7 @@ def strassen_mlt(A,B):
     C21 = (P2 + P4)
     C22 = (P1 - P2 + P3 + P6)
     
-    operation_count += 18 * len(P1)
+    operation_count += 18 * len(P1)**2
     
     '''top_row = np.hstack((C11, C12))
     bottom_row = np.hstack((C21, C22))
@@ -134,8 +143,39 @@ print("Number of operations:", operation_count)
 print("Number of operations (Standard mlt):", standard_mlt(A, B)[1])
 # print("Result:", res, sep='\n')
 
+filename = "factorizations_r.npz"
+with open(filename, 'rb') as f:
+    factorizations = dict(np.load(f, allow_pickle=True))
 
+for key in factorizations:
+    u, v, w = factorizations[key]
+    rank = u.shape[-1]
+    assert rank == v.shape[-1] and rank == w.shape[-1]
+    print(f'{key}: rank={u.shape[-1]}')
+
+print(factorizations['4,5,5'][2][0])
+
+# (4x5)*(5x5)=(4x5)
+# https://www.nature.com/articles/s41586-022-05172-4
+
+# naprawione ale nie wiem czego to dziala
 def ai_mlt(A,B, factor):
+    '''
+    do mnożenia macierzy (4^n x 5^n)*(5^n x 5^n)
+    factor[0] - do macierzy A
+    factor[1] - do macierzy B
+    factor[2] - do macierzy C
+    
+    factor[0] i factor[1] - macierze o rozmiarze (n*m)x(ilość mnożeń), każda kolumna oznacza które elementy
+    i z jakim współczynnikiem biorę do którejś z sum w danym mnożeniu (sum_A)*(sum_B) = m_i, wiersz o danym numerze
+    odpowiada w macierzy A lub B elementowi który miałby ten sam indeks po zlinearyzowaniu macierzy
+    
+    factor[2] - (n*m)x(ilość mnożeń), podobnie jak wyżej ale tutaj wiersze oznaczają które z wcześniej policzonych wyników 
+    mnożeń składają się na wynik w danym fragmencie macierzy.
+    
+    Na obrazku wyżej fajnie widać jak to mniej więcej działa, u= factor[0], v = factor[1] i w = factor[2]
+
+    '''
     global operation_count
     if A.shape == (4,5) and B.shape == (5,5):
         result = np.zeros((4,5), dtype=float)
@@ -143,8 +183,12 @@ def ai_mlt(A,B, factor):
             for j in range(len(B[0])):
                    for k in range(len(B)):
                         result[i][j] += A[i][k] * B[k][j]
-                        plus_count += 1
-                        mult_count += 1
+                        #plus_count += 1
+                        #mult_count += 1
+        
+        # mult_count += 76
+        # plus_count += 539 #teoretycznie tyle by zajelo gdyby przepisac to wszystko z dolu i zamienic mnozenia
+        #macierzy na zwykle
         return result
 
     
@@ -172,6 +216,7 @@ def ai_mlt(A,B, factor):
                 x,y = np.unravel_index(j, (4,5))
                 A_factor += A[x*n:(x+1)*n, y*m: (y+1)*m]*A_elements[j]
                 
+                # plus_count += len(A_factor[0])*len(A_factor)
                 operation_count += len(A_factor)*len(A_factor[0])
         
         B_factor = np.zeros((k,k), dtype = float)
@@ -180,11 +225,14 @@ def ai_mlt(A,B, factor):
                 x,y = np.unravel_index(j, (5,5))
                 B_factor += B[x*k:(x+1)*k, y*k: (y+1)*k]*B_elements[j]
                 
+                # plus_count += len(B_factor)**2
                 operation_count += len(B_factor)**2
         
         m_res = ai_mlt(A_factor, B_factor, factor)
+        #operation_count += 1
         mtab[i] = m_res
     
+    #temp_res = A@B
     res_matrix = np.zeros((n*4,m*5), dtype = float)
     
     xind = 0
@@ -196,6 +244,8 @@ def ai_mlt(A,B, factor):
         for j in range(len(C_elements)):
             if C_elements[j] != 0:
                 res_fragment += mtab[j]*C_elements[j]
+                
+                # plus_count += n*m
         
         if xind >= 4:  
             yind+=1
@@ -206,10 +256,42 @@ def ai_mlt(A,B, factor):
         xind+=1
         
     return res_matrix
+  
+a1 = random_matrix((4**3,5**3), 0, 1)
+a2 = random_matrix((5**3,5**3), 0, 1)
 
-/////////////////////////////////////////////////////////////////////////////
+operation_count = 0
+r1 = ai_mlt(a1, a2, factorizations['4,5,5'])
+r2, op = standard_mlt(a1,a2)
+print(operation_count, op)
+# print(a1.shape, a2.shape)
 
-exponents = [2, 4, 8, 16, 32, 64, 128, 256]
+def exists(a, b, block):
+    for x in range(4):
+        for y in range(5):
+            mb = b[x*n:(x+1)*n, y*m: (y+1)*m]
+            if np.allclose(mb, block):
+                return True, x, y
+            
+r2 = a1@a2
+
+n = 4
+m = 5
+
+for x in range(4):
+    for y in range(5):
+        mb = r2[x*n:(x+1)*n, y*m: (y+1)*m]
+        ma = r1[x*n:(x+1)*n, y*m: (y+1)*m]
+        # print(ma)
+        # print("------")
+        # print(mb)
+        print(np.allclose(ma, mb), x, y)
+        if not np.allclose(ma, mb):
+            print(exists(r1, r2, ma))
+        # print("\n\n")
+print(np.allclose(r1,r2))
+
+exponents = [2**i for i in range(1,9)]
 
 res_times = []
 res_operations = []
@@ -237,13 +319,38 @@ for exp in exponents:
     res_times.append((std_time, bin_time, str_time))
     res_operations.append((std_op, bin_op, str_op))
 
+e = 4
+ai_sizes_a = [(4**n, 5**n) for n in range(1,e)]
+ai_sizes_b = [(5**n, 5**n) for n in range(1,e)]
+sizes = list(zip(ai_sizes_a, ai_sizes_b))
+
+ai_times = []
+ai_op = []
+
+for size in sizes:
+    A = random_matrix(size[0], 0, 1)
+    B = random_matrix(size[1], 0, 1)
+    
+    operation_count = 0
+    st = time()
+    r = ai_mlt(A,B, factorizations['4,5,5'])
+    en = time()
+    
+    
+    stdt = time()
+    r1, op = standard_mlt(A,B)
+    stde = time()
+    
+    ai_times.append((en-st, stde-stdt))
+    ai_op.append((operation_count, op))
+
 plt.plot(exponents, res_times)
 plt.title("Multiplication times comparision")
 plt.xlabel("exponent")
 plt.ylabel("time [s]")
 plt.xticks(exponents)
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("times256")
+# plt.savefig("./img/times256")
 plt.show()
 
 plt.plot(exponents, res_operations)
@@ -252,7 +359,7 @@ plt.xlabel("exponent")
 plt.ylabel("number of operations")
 plt.xticks(exponents)
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("operations256")
+# plt.savefig("./img/operations256")
 plt.show()
 
 no_elements = 4
@@ -263,7 +370,7 @@ plt.xlabel("exponent")
 plt.ylabel("time [s]")
 plt.xticks(exponents[:no_elements])
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("times16")
+# plt.savefig("./img/times16")
 plt.show()
 
 plt.plot(exponents[:no_elements], res_times[:no_elements], 'o')
@@ -272,7 +379,7 @@ plt.xlabel("exponent")
 plt.ylabel("time [s]")
 plt.xticks(exponents[:no_elements])
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("times16_o")
+# plt.savefig("./img/times16_o")
 plt.show()
 
 plt.plot(exponents[:no_elements], res_operations[:no_elements])
@@ -281,7 +388,7 @@ plt.xlabel("exponent")
 plt.ylabel("number of operations")
 plt.xticks(exponents[:no_elements])
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("operations16")
+# plt.savefig("./img/operations16")
 plt.show()
 
 plt.plot(exponents[:no_elements], res_operations[:no_elements], 'o')
@@ -290,5 +397,51 @@ plt.xlabel("exponent")
 plt.ylabel("number of operations")
 plt.xticks(exponents[:no_elements])
 plt.legend(("standard mlt", "binet mlt", "strassen mlt"))
-plt.savefig("operations16_o")
+# plt.savefig("./img/operations16_o")
 plt.show()
+
+nnn = 3
+plt.plot(range(1,e)[:nnn], ai_times[:nnn])
+plt.title("Multiplication times comparision")
+plt.ylabel("time [s]")
+plt.legend(("AI", "standard"))
+# plt.savefig("./img/aitimes.png")
+plt.show()
+
+nnn = 3
+plt.plot(range(1,e), ai_op)
+plt.title("Multiplication operations comparision")
+plt.ylabel("no_operations")
+plt.legend(("AI", "standard"))
+# plt.savefig("./img/aioperations.png")
+plt.show()
+
+from math import log
+
+sizes = [2**i for i in range(2, 10)]
+
+print("Binet:")
+for size in sizes:
+    A = random_matrix((size, size), min_val, max_val)
+    B = random_matrix((size, size), min_val, max_val)
+
+    operation_count = 0
+    binet_mlt(A, B)
+
+    x = log(operation_count, size)
+    print(x)
+    
+print(f"Complexity: n^{x}\n")
+
+print("Strassen:")
+for size in sizes:
+    A = random_matrix((size, size), min_val, max_val)
+    B = random_matrix((size, size), min_val, max_val)
+
+    operation_count = 0
+    strassen_mlt(A, B)
+
+    x = log(operation_count, size)
+    print(x)
+    
+print(f"Complexity: n^{x}\n")

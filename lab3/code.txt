@@ -121,7 +121,7 @@ print(a)
 
 tree = create_tree(a, 2, 10**(-8))
 #print(decompress(tree))
-print(np.allclose(a, decompress(tree)))
+print(np.sum(np.square(a - decompress(tree))))
 
 
 

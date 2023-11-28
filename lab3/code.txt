@@ -1,0 +1,197 @@
+import numpy as np
+from time import time
+from matplotlib import pyplot as plt
+import pandas as pd
+
+import scipy.sparse as scs
+from sklearn.utils.extmath import randomized_svd
+
+def random_matrix(n,m,density):
+    A = scs.random(n,m,density)
+    return A.toarray()
+
+
+class Node:
+    def __init__(self, t_min, t_max, s_min, s_max):
+        self.t_min = t_min
+        self.t_max = t_max
+        
+        self.s_min = s_min
+        self.s_max = s_max
+        
+        self.rank = None
+
+        self.U = None
+        self.S = None
+        self.VT = None
+        
+        self.zeros = False
+        
+        
+        self.children = []
+        
+        
+
+def is_admissible(matrix, S, r, eps):
+    if min(matrix.shape) <= r:
+        return True
+    
+    if S[-1] < eps:
+        return True
+    
+    return False     
+
+
+
+
+def create_tree(matrix, r, eps):
+    n, m = matrix.shape
+
+    
+    def create_tree_r(t_min, t_max, s_min, s_max):
+        nonlocal matrix, r, eps
+        
+        if not np.any(matrix[t_min:t_max, s_min:s_max]):
+            v = Node(t_min, t_max, s_min, s_max)
+            v.rank = 0
+            v.zeros = True
+            return v
+    
+        U,S,V = randomized_svd(matrix[t_min:t_max, s_min:s_max], r)
+        
+        S = S[S >= eps]  
+        rank = len(S)
+        
+        U = U[:, :rank]
+        V = V[:rank, :]
+        if rank == 0:
+            v = Node(t_min, t_max, s_min, s_max)
+            v.rank = 0
+            v.zeros = True
+            return v
+        
+        
+        if is_admissible(matrix[t_min:t_max, s_min:s_max], S, r, eps):
+            v = Node(t_min, t_max, s_min, s_max) #compress matrix
+            v.rank = rank
+            v.U = U
+            v.S = S
+            v.V = V
+            return v
+            
+        else:
+            v = Node(t_min, t_max, s_min, s_max)
+            
+            t_newmax = (t_min + t_max)//2
+            s_newmax = (s_min + s_max)//2
+            
+            v1 = create_tree_r(t_min, t_newmax, s_min, s_newmax)
+            v2 = create_tree_r(t_min, t_newmax, s_newmax, s_max)
+            v3 = create_tree_r(t_newmax, t_max, s_min, s_newmax)
+            v4 = create_tree_r(t_newmax, t_max, s_newmax, s_max)
+            
+            v.children = [v1, v2, v3, v4]
+        return v
+    return create_tree_r(0, n, 0, m)
+
+
+
+
+def decompress(node):
+    if node.rank is not None:
+        if node.rank > 0:
+            return node.U@np.diag(node.S)@node.V
+        else:
+            return np.zeros((node.t_max - node.t_min, node.s_max - node.s_min))
+    else:
+        return np.vstack(
+            (
+                np.hstack((decompress(node.children[0]), decompress(node.children[1]))),
+                np.hstack((decompress(node.children[2]), decompress(node.children[3]))),
+            )
+        )   
+
+
+
+s = 2**8
+a = scs.random(s,s,density = 0.25)
+a = a.toarray()
+print(a)
+
+
+tree = create_tree(a, 2, 10**(-8))
+#print(decompress(tree))
+print(np.allclose(a, decompress(tree)))
+
+
+
+def plot_matrix(root, matrix, title = None):
+    size = matrix.shape
+    tmap = np.zeros(size)
+    
+    def fill_map(node):
+        nonlocal tmap
+        if node.rank is not None:
+            if node.rank != 0:
+                tmap[node.t_min:node.t_max, node.s_min:node.s_min + node.rank] = 1
+                tmap[node.t_min:node.t_min + node.rank, node.s_min:node.s_max] = 1
+        else:
+            for submatrix in node.children:
+                fill_map(submatrix)
+    fill_map(root)
+    f, ax = plt.subplots(1,1)
+    ax.spy(tmap)
+    if title is not None:
+        ax.set_title(title)
+        
+
+plot_matrix(tree, a)
+
+
+sizes = [2**i for i in range(8,12)]
+densities = [0.01, 0.05, 0.1, 0.2]
+
+results = {}
+for density in densities:
+    for size in sizes:
+        matrix = random_matrix(size,size,density)
+        
+        _, S, _ = np.linalg.svd(matrix)
+        singular_values = [('0', S[0]), ('n//2', S[size//2]), ('n', S[-1])]
+        
+        for b in [2,4,8]:
+            for ind, singular_value in singular_values:
+                start = time()
+                tree = create_tree(matrix, b, singular_value)
+                end = time()
+                print(density, size, b, singular_value, end-start)
+                
+                ftime = f"{end - start:.5f}"
+                plot_matrix(tree, matrix, title = f"{size}x{size}\n density = {density}\n rank = {b}\n singular value cut-off = {singular_value} \n time: {ftime}s")
+                x = (density, size, b, ind)
+                results[x] = end - start
+                           
+
+
+        
+def filter_results(results, filters):
+#filters - dict {'density': wartosc/None, 'size': wartosc/None, 'rank': wartosc/None, 'sval': wartosc/None}
+    filtered_results = results.copy()
+    
+    hdict = {'density' : 0, 'size' : 1, 'rank': 2, 'sval' : 3}
+
+    for param, value in filters.items():
+        if value is not None:
+            filtered_results = {key: val for key, val in filtered_results.items() if key[hdict[param]] == value}
+
+    return filtered_results
+
+
+
+filters = {'density': densities[0], 'size': sizes[0], 'rank': None, 'sval': None}
+fres = filter_results(results, filters)
+print(fres)
+
+
+
+

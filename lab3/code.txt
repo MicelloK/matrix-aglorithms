@@ -6,6 +6,7 @@ import pandas as pd
 import scipy.sparse as scs
 from sklearn.utils.extmath import randomized_svd
 
+
 def random_matrix(n,m,density):
     A = scs.random(n,m,density)
     return A.toarray()
@@ -19,30 +20,25 @@ class Node:
         self.s_min = s_min
         self.s_max = s_max
         
-        self.rank = None
-
+        self.rank = None # = 0 ---> zero matrix, #None ---> not a leaf
+        
         self.U = None
         self.S = None
         self.VT = None
         
-        self.zeros = False
-        
         
         self.children = []
-        
-        
+
+
 
 def is_admissible(matrix, S, r, eps):
-    if min(matrix.shape) <= r:
-        return True
+    if min(matrix.shape) <= r: #jeśli po kolejnym podziale nie będzie 
+        return True                    #możliwe obliczenie SVD z rank r to skompresuj macierz
     
     if S[-1] < eps:
         return True
     
     return False     
-
-
-
 
 def create_tree(matrix, r, eps):
     n, m = matrix.shape
@@ -54,26 +50,12 @@ def create_tree(matrix, r, eps):
         if not np.any(matrix[t_min:t_max, s_min:s_max]):
             v = Node(t_min, t_max, s_min, s_max)
             v.rank = 0
-            v.zeros = True
             return v
     
         U,S,V = randomized_svd(matrix[t_min:t_max, s_min:s_max], r)
-        
-        S = S[S >= eps]  
-        rank = len(S)
-        
-        U = U[:, :rank]
-        V = V[:rank, :]
-        if rank == 0:
-            v = Node(t_min, t_max, s_min, s_max)
-            v.rank = 0
-            v.zeros = True
-            return v
-        
-        
         if is_admissible(matrix[t_min:t_max, s_min:s_max], S, r, eps):
             v = Node(t_min, t_max, s_min, s_max) #compress matrix
-            v.rank = rank
+            v.rank = r
             v.U = U
             v.S = S
             v.V = V
@@ -95,8 +77,6 @@ def create_tree(matrix, r, eps):
     return create_tree_r(0, n, 0, m)
 
 
-
-
 def decompress(node):
     if node.rank is not None:
         if node.rank > 0:
@@ -112,20 +92,21 @@ def decompress(node):
         )   
 
 
-
-s = 2**8
-a = scs.random(s,s,density = 0.25)
+s = 2**6
+a = scs.random(s,s,density = 0.1)
 a = a.toarray()
 print(a)
 
-
 tree = create_tree(a, 2, 10**(-8))
 #print(decompress(tree))
+
+def error(tree, matrix):
+    return np.sum(np.square(matrix - decompress(tree)))
+
 print(np.sum(np.square(a - decompress(tree))))
 
 
-
-def plot_matrix(root, matrix, title = None):
+def plot_matrix(root, matrix, singular_values, title = None):
     size = matrix.shape
     tmap = np.zeros(size)
     
@@ -139,16 +120,19 @@ def plot_matrix(root, matrix, title = None):
             for submatrix in node.children:
                 fill_map(submatrix)
     fill_map(root)
-    f, ax = plt.subplots(1,1)
-    ax.spy(tmap)
+    f, ax = plt.subplots(2,1)
+    ax[0].spy(tmap)
     if title is not None:
-        ax.set_title(title)
+        ax[0].set_title(title)
+    x = np.array([i for i in range(len(singular_values))])
+    ax[1].scatter(x, singular_values)
         
 
-plot_matrix(tree, a)
+U, S, V = np.linalg.svd(a)
+plot_matrix(tree, a, S)
 
 
-sizes = [2**i for i in range(8,12)]
+sizes = [2**i for i in range(6,12)]
 densities = [0.01, 0.05, 0.1, 0.2]
 
 results = {}
@@ -167,13 +151,12 @@ for density in densities:
                 print(density, size, b, singular_value, end-start)
                 
                 ftime = f"{end - start:.5f}"
-                plot_matrix(tree, matrix, title = f"{size}x{size}\n density = {density}\n rank = {b}\n singular value cut-off = {singular_value} \n time: {ftime}s")
+                plot_matrix(tree, matrix, S, title = f"{size}x{size}\n density = {density}\n rank = {b}\n singular value cut-off = {singular_value} ({ind}) \n time: {ftime}s\n error: {error(tree, matrix)}")
                 x = (density, size, b, ind)
                 results[x] = end - start
-                           
 
 
-        
+
 def filter_results(results, filters):
 #filters - dict {'density': wartosc/None, 'size': wartosc/None, 'rank': wartosc/None, 'sval': wartosc/None}
     filtered_results = results.copy()
@@ -186,12 +169,9 @@ def filter_results(results, filters):
 
     return filtered_results
 
-
-
 filters = {'density': densities[0], 'size': sizes[0], 'rank': None, 'sval': None}
 fres = filter_results(results, filters)
 print(fres)
 
-
-
-
+        
+        
